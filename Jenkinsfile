@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME      = "asx-stock-predictor"
-        IMAGE_TAG       = "${BUILD_NUMBER}"
-        SONAR_HOST      = "http://host.docker.internal:9000"
-        STAGING_PORT    = "5001"
-        PROD_PORT       = "5002"
-        CONTAINER_STAGING = "${IMAGE_NAME}-staging"
-        CONTAINER_PROD    = "${IMAGE_NAME}-prod"
+        IMAGE_NAME        = "task-73hd"
+        IMAGE_TAG         = "${BUILD_NUMBER}"
+        SONAR_HOST        = "http://host.docker.internal:9000"
+        STAGING_PORT      = "5001"
+        PROD_PORT         = "5002"
+        CONTAINER_STAGING = "task-73hd-staging"
+        CONTAINER_PROD    = "task-73hd-prod"
     }
 
     options {
@@ -180,7 +180,7 @@ pipeline {
                     cat trivy-report.txt
 
                     echo ""
-                    echo "--- Trivy: HIGH and CRITICAL only (would fail in strict mode) ---"
+                    echo "--- Trivy: HIGH and CRITICAL only ---"
                     trivy image \
                         --exit-code 0 \
                         --severity HIGH,CRITICAL \
@@ -223,7 +223,6 @@ pipeline {
                 """
 
                 echo "Security scan complete. Review reports above."
-                echo "Any HIGH/CRITICAL findings should be documented in your report."
             }
             post {
                 always {
@@ -374,7 +373,7 @@ pipeline {
                     git config user.email "jenkins@ci.local" || true
                     git config user.name  "Jenkins CI"       || true
                     git tag -a "v1.${IMAGE_TAG}" \
-                        -m "Release build ${BUILD_NUMBER} — $(date '+%Y-%m-%d %H:%M')" \
+                        -m "Release build ${BUILD_NUMBER} — \$(date '+%Y-%m-%d %H:%M')" \
                         2>/dev/null || echo "Tag already exists or git not configured, skipping"
 
                     echo "Release v1.${IMAGE_TAG} is live on port ${PROD_PORT}"
@@ -386,7 +385,7 @@ pipeline {
                     echo "Release tag: v1.${IMAGE_TAG}"
                 }
                 failure {
-                    echo "RELEASE STAGE FAILED — rolling back to staging..."
+                    echo "RELEASE STAGE FAILED — rolling back..."
                     sh """
                         docker stop ${CONTAINER_PROD} 2>/dev/null || true
                         docker rm   ${CONTAINER_PROD} 2>/dev/null || true
@@ -423,16 +422,15 @@ pipeline {
                         echo "Prometheus metrics endpoint CONFIRMED"
                     else
                         echo "WARNING: prediction_requests_total metric not found"
-                        echo "Check that prometheus-client is installed in the app"
                     fi
                 """
 
                 sh """
-                    echo "Generating some traffic so Prometheus has data to scrape..."
+                    echo "Generating traffic so Prometheus has data to scrape..."
                     for i in 1 2 3; do
                         curl -s http://localhost:${PROD_PORT}/predict/CBA.AX > /dev/null
                         curl -s http://localhost:${PROD_PORT}/predict/BHP.AX > /dev/null
-                        curl -s http://localhost:${PROD_PORT}/health        > /dev/null
+                        curl -s http://localhost:${PROD_PORT}/health         > /dev/null
                     done
                     echo "Traffic generated."
                 """
@@ -447,7 +445,7 @@ pipeline {
                     elif echo "\$PROM_STATUS" | grep -q "prometheus_not_ready"; then
                         echo "Prometheus not reachable yet — may still be starting"
                     else
-                        echo "Prometheus target status: pending (first scrape may not have run yet)"
+                        echo "Prometheus target status: pending"
                     fi
                 """
 
@@ -463,11 +461,6 @@ pipeline {
                     echo " Grafana          : http://localhost:3000 (admin/admin)"
                     echo " SonarQube        : http://localhost:9000"
                     echo "==================================================="
-                    echo ""
-                    echo "To simulate an alert:"
-                    echo "  Stop the app container and watch Prometheus mark it DOWN"
-                    echo "  docker stop ${CONTAINER_PROD}"
-                    echo "==================================================="
                 """
             }
             post {
@@ -475,7 +468,7 @@ pipeline {
                     echo "MONITORING STAGE PASSED — full observability stack running"
                 }
                 failure {
-                    echo "MONITORING STAGE FAILED — check docker-compose.yml and container logs"
+                    echo "MONITORING STAGE FAILED — check docker-compose.yml"
                     sh "docker-compose logs prometheus grafana 2>/dev/null || true"
                 }
             }
@@ -488,29 +481,21 @@ pipeline {
     // ================================================================
     post {
         success {
-            echo """
-            ====================================================
-             PIPELINE SUCCEEDED
-            ====================================================
-             Build       : #${BUILD_NUMBER}
-             Image       : ${IMAGE_NAME}:${IMAGE_TAG}
-             Staging     : http://localhost:${STAGING_PORT}
-             Production  : http://localhost:${PROD_PORT}
-             SonarQube   : http://localhost:9000
-             Prometheus  : http://localhost:9090
-             Grafana     : http://localhost:3000
-            ====================================================
-            """
+            echo "===================================================="
+            echo " PIPELINE SUCCEEDED — Build #${BUILD_NUMBER}"
+            echo " Image     : ${IMAGE_NAME}:${IMAGE_TAG}"
+            echo " Staging   : http://localhost:${STAGING_PORT}"
+            echo " Production: http://localhost:${PROD_PORT}"
+            echo " SonarQube : http://localhost:9000"
+            echo " Prometheus: http://localhost:9090"
+            echo " Grafana   : http://localhost:3000"
+            echo "===================================================="
         }
         failure {
-            echo """
-            ====================================================
-             PIPELINE FAILED at stage: ${STAGE_NAME}
-            ====================================================
-             Check the console output above for details.
-             Build #${BUILD_NUMBER} did NOT reach production.
-            ====================================================
-            """
+            echo "===================================================="
+            echo " PIPELINE FAILED — Build #${BUILD_NUMBER}"
+            echo " Check console output above for details."
+            echo "===================================================="
         }
         always {
             echo "Archiving all build artefacts..."
@@ -526,7 +511,7 @@ pipeline {
             """, allowEmptyArchive: true
 
             echo "Cleaning up dangling Docker images..."
-            sh "docker image prune -f --filter label=build=${BUILD_NUMBER} 2>/dev/null || true"
+            sh "docker image prune -f 2>/dev/null || true"
 
             echo "Pipeline finished — build #${BUILD_NUMBER}"
         }
