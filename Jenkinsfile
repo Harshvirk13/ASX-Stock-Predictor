@@ -9,6 +9,8 @@ pipeline {
         PROD_PORT         = "5002"
         CONTAINER_STAGING = "task-73hd-staging"
         CONTAINER_PROD    = "task-73hd-prod"
+        PATH              = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin"
+}
     }
 
     options {
