@@ -9,7 +9,7 @@ pipeline {
         PROD_PORT         = "5002"
         CONTAINER_STAGING = "task-73hd-staging"
         CONTAINER_PROD    = "task-73hd-prod"
-        PATH              = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin"
+        PATH              = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin"
     }
 
     options {
@@ -51,21 +51,23 @@ pipeline {
                 echo " STAGE 2: TEST"
                 echo "============================================"
                 sh """
-                    pip install --quiet \
-                        pytest pytest-cov pytest-html \
-                        requests flask yfinance \
-                        scikit-learn pandas numpy \
-                        prometheus-client
-
-                    pytest tests/ \
-                        -v \
-                        --tb=short \
-                        --cov=app \
-                        --cov-report=xml:coverage.xml \
-                        --cov-report=term-missing \
-                        --junitxml=test-results.xml \
-                        --html=test-report.html \
-                        --self-contained-html || true
+                    # Run tests inside Docker container so pip is available
+                    docker run --rm \
+                        -v ${WORKSPACE}:/app \
+                        -w /app \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        sh -c "
+                            pip install --quiet pytest pytest-cov pytest-html &&
+                            pytest tests/ \
+                                -v \
+                                --tb=short \
+                                --cov=app \
+                                --cov-report=xml:coverage.xml \
+                                --cov-report=term-missing \
+                                --junitxml=test-results.xml \
+                                --html=test-report.html \
+                                --self-contained-html || true
+                        "
                 """
             }
             post {
@@ -88,11 +90,18 @@ pipeline {
                 echo " STAGE 3: CODE QUALITY"
                 echo "============================================"
                 sh """
-                    pip install --quiet pytest pytest-cov
-                    pytest tests/ \
-                        --cov=app \
-                        --cov-report=xml:coverage.xml \
-                        -q || true
+                    # Generate coverage report inside Docker
+                    docker run --rm \
+                        -v ${WORKSPACE}:/app \
+                        -w /app \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        sh -c "
+                            pip install --quiet pytest pytest-cov &&
+                            pytest tests/ \
+                                --cov=app \
+                                --cov-report=xml:coverage.xml \
+                                -q || true
+                        "
                 """
                 withSonarQubeEnv("SonarQube") {
                     sh """
@@ -129,6 +138,7 @@ pipeline {
                 echo " STAGE 4: SECURITY"
                 echo "============================================"
                 sh """
+                    echo "--- Trivy: scanning Docker image ---"
                     trivy image \
                         --exit-code 0 \
                         --severity LOW,MEDIUM,HIGH,CRITICAL \
@@ -136,22 +146,43 @@ pipeline {
                         --output trivy-report.txt \
                         ${IMAGE_NAME}:${IMAGE_TAG} || true
                     cat trivy-report.txt
+
+                    trivy image \
+                        --exit-code 0 \
+                        --severity HIGH,CRITICAL \
+                        --format json \
+                        --output trivy-critical.json \
+                        ${IMAGE_NAME}:${IMAGE_TAG} || true
                 """
                 sh """
-                    pip install --quiet bandit
-                    bandit -r app/ -f txt -o bandit-report.txt --exit-zero || true
-                    bandit -r app/ -f json -o bandit-report.json --exit-zero || true
-                    cat bandit-report.txt
+                    echo "--- Bandit: scanning Python source code ---"
+                    docker run --rm \
+                        -v ${WORKSPACE}:/app \
+                        -w /app \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        sh -c "
+                            pip install --quiet bandit &&
+                            bandit -r app/ -f txt -o bandit-report.txt --exit-zero || true &&
+                            bandit -r app/ -f json -o bandit-report.json --exit-zero || true &&
+                            cat bandit-report.txt
+                        "
                 """
                 sh """
-                    pip install --quiet pip-audit || true
-                    pip-audit -r requirements.txt --format=columns -o pip-audit-report.txt || true
-                    cat pip-audit-report.txt || echo "pip-audit report not generated"
+                    echo "--- pip-audit: checking dependencies ---"
+                    docker run --rm \
+                        -v ${WORKSPACE}:/app \
+                        -w /app \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        sh -c "
+                            pip install --quiet pip-audit || true &&
+                            pip-audit -r requirements.txt --format=columns -o pip-audit-report.txt || true &&
+                            cat pip-audit-report.txt || echo 'pip-audit report not generated'
+                        "
                 """
             }
             post {
                 always {
-                    archiveArtifacts artifacts: "trivy-report.txt, bandit-report.txt, bandit-report.json, pip-audit-report.txt", allowEmptyArchive: true
+                    archiveArtifacts artifacts: "trivy-report.txt, trivy-critical.json, bandit-report.txt, bandit-report.json, pip-audit-report.txt", allowEmptyArchive: true
                 }
                 success {
                     echo "SECURITY PASSED"
@@ -340,17 +371,10 @@ pipeline {
 
     post {
         success {
-            echo "===================================================="
-            echo " PIPELINE SUCCEEDED — Build ${BUILD_NUMBER}"
-            echo " Image     : ${IMAGE_NAME}:${IMAGE_TAG}"
-            echo " Staging   : http://localhost:${STAGING_PORT}"
-            echo " Production: http://localhost:${PROD_PORT}"
-            echo "===================================================="
+            echo "PIPELINE SUCCEEDED — Build ${BUILD_NUMBER} — Image ${IMAGE_NAME}:${IMAGE_TAG}"
         }
         failure {
-            echo "===================================================="
-            echo " PIPELINE FAILED — Build ${BUILD_NUMBER}"
-            echo "===================================================="
+            echo "PIPELINE FAILED — Build ${BUILD_NUMBER}"
         }
         always {
             archiveArtifacts artifacts: "coverage.xml, test-results.xml, test-report.html, trivy-report.txt, bandit-report.txt, pip-audit-report.txt", allowEmptyArchive: true
