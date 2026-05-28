@@ -51,14 +51,13 @@ pipeline {
                 echo " STAGE 2: TEST"
                 echo "============================================"
                 sh """
-                    # Run tests inside Docker container so pip is available
                     docker run --rm \
                         -v ${WORKSPACE}:/app \
                         -w /app \
                         ${IMAGE_NAME}:${IMAGE_TAG} \
                         sh -c "
                             pip install --quiet pytest pytest-cov pytest-html &&
-                            pytest tests/ \
+                            PYTHONPATH=/app pytest tests/ \
                                 -v \
                                 --tb=short \
                                 --cov=app \
@@ -90,33 +89,34 @@ pipeline {
                 echo " STAGE 3: CODE QUALITY"
                 echo "============================================"
                 sh """
-                    # Generate coverage report inside Docker
                     docker run --rm \
                         -v ${WORKSPACE}:/app \
                         -w /app \
                         ${IMAGE_NAME}:${IMAGE_TAG} \
                         sh -c "
                             pip install --quiet pytest pytest-cov &&
-                            pytest tests/ \
+                            PYTHONPATH=/app pytest tests/ \
                                 --cov=app \
                                 --cov-report=xml:coverage.xml \
                                 -q || true
                         "
                 """
                 withSonarQubeEnv("SonarQube") {
-                    sh """
-                        sonar-scanner \
-                            -Dsonar.projectKey=asx-stock-predictor \
-                            -Dsonar.projectName=ASX-Stock-Predictor \
-                            -Dsonar.projectVersion=1.${BUILD_NUMBER} \
-                            -Dsonar.sources=app \
-                            -Dsonar.tests=tests \
-                            -Dsonar.language=py \
-                            -Dsonar.python.version=3.11 \
-                            -Dsonar.python.coverage.reportPaths=coverage.xml \
-                            -Dsonar.exclusions=**/__pycache__/**,**/*.pyc \
-                            -Dsonar.sourceEncoding=UTF-8
-                    """
+                    withEnv(["PATH+SONAR=${tool 'SonarScanner'}/bin"]) {
+                        sh """
+                            sonar-scanner \
+                                -Dsonar.projectKey=asx-stock-predictor \
+                                -Dsonar.projectName=ASX-Stock-Predictor \
+                                -Dsonar.projectVersion=1.${BUILD_NUMBER} \
+                                -Dsonar.sources=app \
+                                -Dsonar.tests=tests \
+                                -Dsonar.language=py \
+                                -Dsonar.python.version=3.11 \
+                                -Dsonar.python.coverage.reportPaths=coverage.xml \
+                                -Dsonar.exclusions=**/__pycache__/**,**/*.pyc \
+                                -Dsonar.sourceEncoding=UTF-8
+                        """
+                    }
                 }
                 timeout(time: 5, unit: "MINUTES") {
                     waitForQualityGate abortPipeline: true
@@ -341,7 +341,7 @@ pipeline {
                     if echo "\$PROM" | grep -q '"health":"up"'; then
                         echo "Prometheus scraping target is UP"
                     else
-                        echo "Prometheus starting — target may appear after first scrape interval"
+                        echo "Prometheus starting — target appears after first scrape interval"
                     fi
 
                     echo ""
