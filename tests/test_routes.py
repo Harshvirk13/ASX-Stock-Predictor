@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from app.routes import app
 
 @pytest.fixture
@@ -22,6 +23,13 @@ def test_invalid_ticker(client):
     assert resp.status_code == 400
 
 def test_predict_cba(client):
-    resp = client.get("/predict/CBA.AX")
+    mock_result = {
+        "ticker": "CBA.AX",
+        "predicted_close": 125.50,
+        "mae": 1.23,
+        "note": "Prediction based on available data"
+    }
+    with patch("app.routes.predict_next_close", return_value=mock_result):
+        resp = client.get("/predict/CBA.AX")
     assert resp.status_code == 200
     assert "predicted_close" in resp.json

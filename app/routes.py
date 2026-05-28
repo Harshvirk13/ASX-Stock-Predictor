@@ -4,7 +4,11 @@ from .data_fetcher import ASX_STOCKS
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
 app = Flask(__name__)
-REQUEST_COUNT = Counter("prediction_requests_total", "Total prediction requests", ["ticker"])
+REQUEST_COUNT = Counter(
+    "prediction_requests_total",
+    "Total prediction requests",
+    ["ticker"]
+)
 
 @app.route("/health")
 def health():
@@ -14,9 +18,12 @@ def health():
 def predict(ticker):
     if ticker not in ASX_STOCKS:
         return jsonify({"error": "Unsupported ticker"}), 400
-    REQUEST_COUNT.labels(ticker=ticker).inc()
-    result = predict_next_close(ticker)
-    return jsonify(result)
+    try:
+        REQUEST_COUNT.labels(ticker=ticker).inc()
+        result = predict_next_close(ticker)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "ticker": ticker}), 500
 
 @app.route("/stocks")
 def stocks():

@@ -9,7 +9,8 @@ pipeline {
         PROD_PORT         = "5002"
         CONTAINER_STAGING = "task-73hd-staging"
         CONTAINER_PROD    = "task-73hd-prod"
-        PATH              = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin"
+        PATH              = "/opt/homebrew/opt/openjdk@17/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin"
+        JAVA_HOME         = "/opt/homebrew/opt/openjdk@17"
     }
 
     options {
@@ -36,12 +37,8 @@ pipeline {
                 """
             }
             post {
-                success {
-                    echo "BUILD PASSED — ${IMAGE_NAME}:${IMAGE_TAG} ready"
-                }
-                failure {
-                    echo "BUILD FAILED — check Dockerfile"
-                }
+                success { echo "BUILD PASSED — ${IMAGE_NAME}:${IMAGE_TAG} ready" }
+                failure { echo "BUILD FAILED — check Dockerfile" }
             }
         }
 
@@ -74,12 +71,8 @@ pipeline {
                     junit allowEmptyResults: true, testResults: "test-results.xml"
                     archiveArtifacts artifacts: "test-results.xml, coverage.xml, test-report.html", allowEmptyArchive: true
                 }
-                success {
-                    echo "TEST PASSED"
-                }
-                failure {
-                    echo "TEST FAILED"
-                }
+                success { echo "TEST PASSED" }
+                failure { echo "TEST FAILED" }
             }
         }
 
@@ -102,7 +95,7 @@ pipeline {
                         "
                 """
                 withSonarQubeEnv("SonarQube") {
-                    withEnv(["PATH+SONAR=${tool 'SonarScanner'}/bin"]) {
+                    withEnv(["PATH+SONAR=${tool 'SonarScanner'}/bin", "JAVA_HOME=/opt/homebrew/opt/openjdk@17"]) {
                         sh """
                             sonar-scanner \
                                 -Dsonar.projectKey=asx-stock-predictor \
@@ -123,12 +116,8 @@ pipeline {
                 }
             }
             post {
-                success {
-                    echo "CODE QUALITY PASSED"
-                }
-                failure {
-                    echo "CODE QUALITY FAILED"
-                }
+                success { echo "CODE QUALITY PASSED" }
+                failure { echo "CODE QUALITY FAILED" }
             }
         }
 
@@ -184,9 +173,7 @@ pipeline {
                 always {
                     archiveArtifacts artifacts: "trivy-report.txt, trivy-critical.json, bandit-report.txt, bandit-report.json, pip-audit-report.txt", allowEmptyArchive: true
                 }
-                success {
-                    echo "SECURITY PASSED"
-                }
+                success { echo "SECURITY PASSED" }
             }
         }
 
@@ -231,9 +218,7 @@ pipeline {
                 """
             }
             post {
-                success {
-                    echo "DEPLOY PASSED — staging on port ${STAGING_PORT}"
-                }
+                success { echo "DEPLOY PASSED — staging on port ${STAGING_PORT}" }
                 failure {
                     echo "DEPLOY FAILED"
                     sh "docker logs ${CONTAINER_STAGING} || true"
@@ -297,9 +282,7 @@ pipeline {
                 """
             }
             post {
-                success {
-                    echo "RELEASE PASSED — production on port ${PROD_PORT}"
-                }
+                success { echo "RELEASE PASSED — production on port ${PROD_PORT}" }
                 failure {
                     echo "RELEASE FAILED — rolling back"
                     sh "docker stop ${CONTAINER_PROD} 2>/dev/null || true"
@@ -357,9 +340,7 @@ pipeline {
                 """
             }
             post {
-                success {
-                    echo "MONITORING PASSED — observability stack running"
-                }
+                success { echo "MONITORING PASSED — observability stack running" }
                 failure {
                     echo "MONITORING FAILED"
                     sh "docker-compose logs prometheus grafana 2>/dev/null || true"
